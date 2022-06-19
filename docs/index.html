@@ -338,7 +338,7 @@ const generators = {
     gen_value,
 }
 function generate(parsed, flags) {
-    if (parsed) console.log(parsed, flags)
+    // if (parsed) console.log(parsed, flags)
     if (!parsed) { return '' }
     let s = gen_collect(parsed, 0)
     switch (parsed.type) {
