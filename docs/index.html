@@ -299,10 +299,10 @@ function gen_anchor(obj, nest) {
     let mf = undefined
     switch (obj.kind) {
         case 'start':
-            mf = 'Anchor.startOfSubject'
+            mf = 'Anchor.startOfLine'
             break
         case 'end':
-            mf = 'Anchor.endOfSubject'
+            mf = 'Anchor.endOfLine'
             break
         case 'boundary':
             mf = 'Anchor.wordBoundary'
