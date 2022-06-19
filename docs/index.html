@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="author" content="paiv">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+
+    <title>RegexBuilder Generator</title>
+
+<style media="screen">
+:root {--bg:#fff; --fg:#000; --lb:#b8b8b8;}
+@media (prefers-color-scheme:dark) {:root {--bg:#202124; --fg:#f1f3f4; --lb:#5F626B}}
+:root {background:var(--bg); color:var(--fg); font-family:system-ui, ui-monospace, monospace;}
+noscript {position:absolute; top:0; left:25%; background:magenta; color:white; padding:1em;}
+a {color:#9e9eff;}
+textarea {background:var(--bg); color:var(--fg); border:none; padding:0; outline:none;}
+code {white-space:pre-wrap;}
+#err {color:#f00;}
+.fv {display:flex; flex-flow:column wrap;}
+.fh {display:flex; flex-flow:row nowrap;}
+.fvi {margin:1em;}
+.ct * {vertical-align:top;}
+.rxf {color:var(--lb);}
+</style>
+</head>
+<body>
+
+<div>
+    <a href="https://github.com/paiv/swift-rxbgen">paiv</a>
+    ::
+    <a href="https://developer.apple.com/documentation/regexbuilder">RegexBuilder</a> Generator
+</div>
+
+<div class="fv">
+<form method="post">
+<div class="fvi fh">
+    <div class="ct">
+        <span>/</span>
+        <textarea id="rin" type="text" name="rin" rows="3" placeholder="regular expression" spellcheck="false" wrap="soft" autofocus></textarea>
+        <span>/</span>
+    </div>
+    <div>
+        <div>
+            <label for="rfi">
+                <input id="rfi" type="checkbox" name="rfi">
+            i</label>
+        </div>
+        <div>
+            <label for="rfm">
+                <input id="rfm" type="checkbox" name="rfm">
+            m</label>
+        </div>
+        <div>
+            <label for="rfs">
+                <input id="rfs" type="checkbox" name="rfs">
+            s</label>
+        </div>
+        <div>
+            <label for="rfu">
+                <input id="rfu" type="checkbox" name="rfu">
+            U</label>
+        </div>
+    </div>
+</form>
+</div>
+<div class="fvi">
+    <code id="out"></code>
+    <pre id="err"></pre>
+</div>
+</div>
+
+<script src="regjsparser/parser.js"></script>
+<script>
+function report(err) {
+    let el = document.getElementById('err')
+    el.textContent = err
+}
+function parse(text) {
+    const backend = window.regjsparser
+    const backendFlags = 'u'
+    const backendFeatures = {
+        lookbehind:true,
+        namedGroups:true,
+        unicodePropertyEscape:true,
+    }
+    try {
+        return backend.parse(text, backendFlags, backendFeatures)
+    }
+    catch (e) {
+        report(e)
+    }
+}
+function pad(n) { return '  '.repeat(n) }
+function gen_collect(obj, nest) {
+    let m = 'gen_' + obj.type
+    let f = generators[m]
+    if (!f) {
+        return gen_unhandled(obj, nest)
+    }
+    return f(obj, nest)
+}
+function collect_body(body, nest) {
+    function get_value(item) {
+        switch (item.kind) {
+            case 'symbol': return item.raw
+            case 'identifier': return item.raw.substring(1)
+            case 'singleEscape': return item.raw
+            case 'null': return item.raw
+            case 'hexadecimalEscape':
+            case 'unicodeEscape':
+            case 'unicodeCodePointEscape':
+            case 'controlLetter': return `\\u{${item.codePoint.toString(16)}}`
+            default:
+                console.error('get_value', item.kind);
+        }
+    }
+    let state = 0
+    let run = undefined
+    let so = ''
+    for (let item of body) {
+        switch (state) {
+            case 0:
+                if (item.type === 'value') {
+                    let v = get_value(item)
+                    run = [v !== undefined ? v : item.raw]
+                    state = 1
+                }
+                else {
+                    so += gen_collect(item, nest)
+                }
+                break
+            case 1:
+                if (item.type === 'value') {
+                    let v = get_value(item)
+                    run.push(v !== undefined ? v : item.raw)
+                }
+                else {
+                    so += `${pad(nest)}"${run.join('')}"\n`
+                    so += gen_collect(item, nest)
+                    run = undefined
+                    state = 0
+                }
+                break
+        }
+    }
+    if (run) {
+        so += `${pad(nest)}"${run.join('')}"\n`
+    }
+    return so
+}
+function gen_group(obj, nest) {
+    let inner = collect_body(obj.body, nest + 1)
+    let op = (() => {
+        switch (obj.behavior) {
+            case 'normal':
+                if (obj.name) {
+                    return `Capture(as: ${obj.name.value})`
+                }
+                return 'Capture'
+            case 'lookahead': return 'Lookahead'
+            case 'negativeLookahead': return 'Lookahead(negative: true)'
+            case 'ignore': return 'Regex'
+        }
+    })()
+    if (op) {
+        return `${pad(nest)}${op} {\n${inner}${pad(nest)}}\n`
+    }
+    return `${pad(nest)}/* Regex { // gen:group ${obj.behavior}\n${inner}${pad(nest)}} */\n`
+}
+function gen_reference(obj, nest) {
+    if (obj.name !== undefined) {
+        return `${pad(nest)}${obj.name.value}\n`
+    }
+    if (obj.matchIndex !== undefined) {
+        return `${pad(nest)}capture_${obj.matchIndex}\n`
+    }
+    return `${pad(nest)}// gen:reference ${obj.raw}\n`
+}
+function gen_alternative(obj, nest) {
+    let inner = collect_body(obj.body, nest + 1)
+    let op = 'Regex'
+    return `${pad(nest)}${op} {\n${inner}${pad(nest)}}\n`
+}
+function gen_disjunction(obj, nest) {
+    return `${pad(nest)}ChoiceOf {\n${obj.body.map(x => gen_collect(x, nest+1)).join('')}${pad(nest)}}\n`
+}
+function gen_value(obj, nest) {
+    function get_value(item) {
+        switch (item.kind) {
+            case 'symbol': return `"${item.raw}"`
+            case 'identifier':
+                if (item.raw[0] === '\\') {
+                    return `"${item.raw.substring(1)}"`
+                }
+                return `// gen:value ${item.kind} ${item.raw}`
+            case 'singleEscape': return `"${item.raw}"`
+            case 'null': return `"${item.raw}"`
+            case 'hexadecimalEscape':
+            case 'unicodeEscape':
+            case 'unicodeCodePointEscape':
+            case 'controlLetter': return `\\u{${item.codePoint.toString(16)}}`
+            default:
+                return `// gen:value ${item.kind} ${item.raw}`
+        }
+    }
+    return `${pad(nest)}${get_value(obj)}\n`
+}
+function gen_characterClass(obj, nest) {
+    return `${pad(nest)}/${obj.raw}/\n`
+}
+function gen_characterClassEscape(obj, nest) {
+    let mf = undefined
+    switch (obj.value) {
+        case 'd':
+            mf = '.digit'
+            break
+        case 'D':
+            mf = '.digit.inverted'
+            break
+        case 's':
+            mf = '.whitespace'
+            break
+        case 'S':
+            mf = '.whitespace.inverted'
+            break
+        case 'w':
+            mf = '.word'
+            break
+        case 'W':
+            mf = '.word.inverted'
+            break
+        default:
+            mf = `// gen:characterClassEscape ${obj.value}`
+    }
+    return `${pad(nest)}${mf}\n`
+}
+function gen_quantifier(obj, nest) {
+    if (obj.body.length !== 1) {
+        return gen_unhandled(obj, nest)
+    }
+    const value = obj.body[0]
+    let op = undefined
+    let rng = undefined
+    let bhv = undefined
+    if (obj.min === 0 && obj.max === 1) {
+        op = 'Optionally'
+    }
+    else if (obj.min === 0 && obj.max === undefined) {
+        op = 'ZeroOrMore'
+    }
+    else if (obj.min === 1 && obj.max === undefined) {
+        op = 'OneOrMore'
+    }
+    else if (obj.max === undefined) {
+        op = 'Repeat'
+        rng = `${obj.min}...`
+    }
+    else if (obj.min === obj.max) {
+        op = 'Repeat'
+        rng = `count:${obj.min}`
+    }
+    else {
+        op = 'Repeat'
+        rng = `${obj.min}...${obj.max}`
+    }
+    if (obj.greedy === false) {
+        bhv = '.reluctant'
+    }
+    let args = []
+    if (rng) { args.push(rng) }
+    if (bhv) { args.push(bhv) }
+    if (args.length) {
+        op = `${op}(${args.join(', ')})`
+    }
+    return `${pad(nest)}${op} {\n${gen_collect(value, nest+1)}${pad(nest)}}\n`
+}
+function gen_modifier(k, nest) {
+    let mf = undefined
+    switch (k) {
+        case 'i':
+            mf = '.ignoresCase()'
+            break
+        case 'm':
+            mf = '.anchorsMatchLineEndings()'
+            break
+        case 's':
+            mf = '.dotMatchesNewlines()'
+            break
+        case 'U':
+            mf = '.repetitionBehavior(.reluctant)'
+            break
+        default:
+            mf = `// gen:modifier ${k}`
+    }
+    return `${pad(nest)}${mf}\n`
+}
+function gen_anchor(obj, nest) {
+    let mf = undefined
+    switch (obj.kind) {
+        case 'start':
+            mf = 'Anchor.startOfSubject'
+            break
+        case 'end':
+            mf = 'Anchor.endOfSubject'
+            break
+        case 'boundary':
+            mf = 'Anchor.wordBoundary'
+            break
+        case 'not-boundary':
+            mf = 'Anchor.wordBoundary.inverted'
+            break
+        default:
+            mf = `// gen:anchor ${obj.kind}`
+    }
+    return `${pad(nest)}${mf}\n`
+}
+function gen_dot(obj, nest) {
+    return `${pad(nest)}.any\n`
+}
+function gen_unicodePropertyEscape(obj, nest) {
+    return `${pad(nest)}/${obj.raw}/ // CharacterClass.generalCategory(...)\n`
+}
+function gen_unhandled(obj, nest) {
+    return `${pad(nest)}"${obj.raw}" // gen:unhandled ${obj.type}\n`
+}
+const generators = {
+    gen_alternative,
+    gen_anchor,
+    gen_characterClass,
+    gen_characterClassEscape,
+    gen_disjunction,
+    gen_dot,
+    gen_group,
+    gen_quantifier,
+    gen_reference,
+    gen_unicodePropertyEscape,
+    gen_value,
+}
+function generate(parsed, flags) {
+    if (parsed) console.log(parsed, flags)
+    if (!parsed) { return '' }
+    let s = gen_collect(parsed, 0)
+    switch (parsed.type) {
+        case 'group':
+        case 'alternative':
+        case 'disjunction':
+        case 'quantifier':
+            break
+        default:
+            s = `Regex {\n${pad(1)}${s}}`
+    }
+    for (let k in flags) {
+        if (flags[k]) {
+            s += gen_modifier(k, 0)
+        }
+    }
+    return s
+}
+function handleInput() {
+    let rin = document.getElementById('rin')
+    let out = document.getElementById('out')
+    let fi = document.getElementById('rfi')
+    let fm = document.getElementById('rfm')
+    let fs = document.getElementById('rfs')
+    let fu = document.getElementById('rfu')
+    let flags = {i:fi.checked, m:fm.checked, s:fs.checked, U:fu.checked}
+    report()
+    out.textContent = generate(parse(rin.value), flags)
+}
+function setupApp() {
+    let out = document.getElementById('out')
+    out.addEventListener('click', (e) => {
+      if(e.detail === 3) {
+          let sel = window.getSelection()
+          sel.removeAllRanges()
+          let r = document.createRange()
+          r.selectNodeContents(e.target)
+          sel.addRange(r)
+    }})
+    let rin = document.getElementById('rin')
+    rin.addEventListener('input', handleInput)
+    for (let n of ['rfi', 'rfm', 'rfs', 'rfu']) {
+        let el = document.getElementById(n)
+        el.addEventListener('change', handleInput)
+    }
+    handleInput()
+}
+window.addEventListener('DOMContentLoaded', setupApp)
+</script>
+<noscript>&lt;noscript&gt;</noscript>
+</body>
+</html>
