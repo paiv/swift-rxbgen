@@ -21,6 +21,8 @@ code {white-space:pre-wrap;}
 .fh {display:flex; flex-flow:row nowrap;}
 .fvi {margin:1em;}
 .ct * {vertical-align:top;}
+.orf {margin:0; padding:0; list-style:none; display:flex; flex-flow:column wrap; height:6rem;}
+.orf li {margin-left:1em;}
 .rxf {color:var(--lb);}
 </style>
 </head>
@@ -40,28 +42,48 @@ code {white-space:pre-wrap;}
         <textarea id="rin" type="text" name="rin" rows="3" placeholder="regular expression" spellcheck="false" wrap="soft" autofocus></textarea>
         <span>/</span>
     </div>
-    <div>
-        <div>
+    <ul class="orf">
+        <li>
             <label for="rfi">
                 <input id="rfi" type="checkbox" name="rfi">
             i</label>
-        </div>
-        <div>
+        </li>
+        <li>
             <label for="rfm">
                 <input id="rfm" type="checkbox" name="rfm">
             m</label>
-        </div>
-        <div>
+        </li>
+        <li>
             <label for="rfs">
                 <input id="rfs" type="checkbox" name="rfs">
             s</label>
-        </div>
-        <div>
-            <label for="rfu">
-                <input id="rfu" type="checkbox" name="rfu">
+        </li>
+        <li>
+            <label for="rfU">
+                <input id="rfU" type="checkbox" name="rfU">
             U</label>
-        </div>
-    </div>
+        </li>
+        <li>
+            <label for="rfD">
+                <input id="rfD" type="checkbox" name="rfD">
+            ?D</label>
+        </li>
+        <li>
+            <label for="rfW">
+                <input id="rfW" type="checkbox" name="rfW">
+            ?W</label>
+        </li>
+        <li>
+            <label for="rfS">
+                <input id="rfS" type="checkbox" name="rfS">
+            ?S</label>
+        </li>
+        <li>
+            <label for="rfP">
+                <input id="rfP" type="checkbox" name="rfP">
+            ?P</label>
+        </li>
+    </ul>
 </form>
 </div>
 <div class="fvi">
@@ -276,23 +298,19 @@ function gen_quantifier(obj, nest) {
     return `${pad(nest)}${op} {\n${gen_collect(value, nest+1)}${pad(nest)}}\n`
 }
 function gen_modifier(k, nest) {
-    let mf = undefined
-    switch (k) {
-        case 'i':
-            mf = '.ignoresCase()'
-            break
-        case 'm':
-            mf = '.anchorsMatchLineEndings()'
-            break
-        case 's':
-            mf = '.dotMatchesNewlines()'
-            break
-        case 'U':
-            mf = '.repetitionBehavior(.reluctant)'
-            break
-        default:
-            mf = `// gen:modifier ${k}`
-    }
+    let mf = ((k) => {
+        switch (k) {
+            case 'i': return '.ignoresCase()'
+            case 'm': return '.anchorsMatchLineEndings()'
+            case 's': return '.dotMatchesNewlines()'
+            case 'U': return '.repetitionBehavior(.reluctant)'
+            case 'D': return '.asciiOnlyDigits()'
+            case 'W': return '.asciiOnlyWordCharacters()'
+            case 'S': return '.asciiOnlyWhitespace()'
+            case 'P': return '.asciiOnlyCharacterClasses()'
+            default: return `// gen:modifier ${k}`
+        }
+    })(k)
     return `${pad(nest)}${mf}\n`
 }
 function gen_anchor(obj, nest) {
@@ -360,11 +378,11 @@ function generate(parsed, flags) {
 function handleInput() {
     let rin = document.getElementById('rin')
     let out = document.getElementById('out')
-    let fi = document.getElementById('rfi')
-    let fm = document.getElementById('rfm')
-    let fs = document.getElementById('rfs')
-    let fu = document.getElementById('rfu')
-    let flags = {i:fi.checked, m:fm.checked, s:fs.checked, U:fu.checked}
+    let flags = {}
+    for (let k of 'imsUDWSP') {
+        let el = document.getElementById('rf' + k)
+        flags[k] = el.checked
+    }
     report()
     out.textContent = generate(parse(rin.value), flags)
 }
@@ -380,8 +398,8 @@ function setupApp() {
     }})
     let rin = document.getElementById('rin')
     rin.addEventListener('input', handleInput)
-    for (let n of ['rfi', 'rfm', 'rfs', 'rfu']) {
-        let el = document.getElementById(n)
+    for (let k of 'imsUDWSP') {
+        let el = document.getElementById('rf' + k)
         el.addEventListener('change', handleInput)
     }
     handleInput()
