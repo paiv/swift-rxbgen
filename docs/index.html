@@ -235,22 +235,22 @@ function gen_characterClassEscape(obj, nest) {
     let mf = undefined
     switch (obj.value) {
         case 'd':
-            mf = '.digit'
+            mf = 'One(.digit)'
             break
         case 'D':
-            mf = '.digit.inverted'
+            mf = 'One(.digit.inverted)'
             break
         case 's':
-            mf = '.whitespace'
+            mf = 'One(.whitespace)'
             break
         case 'S':
-            mf = '.whitespace.inverted'
+            mf = 'One(.whitespace.inverted)'
             break
         case 'w':
-            mf = '.word'
+            mf = 'One(.word)'
             break
         case 'W':
-            mf = '.word.inverted'
+            mf = 'One(.word.inverted)'
             break
         default:
             mf = `// gen:characterClassEscape ${obj.value}`
