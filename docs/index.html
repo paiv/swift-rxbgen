@@ -114,15 +114,15 @@ function parse(text) {
     }
 }
 function pad(n) { return '  '.repeat(n) }
-function gen_collect(obj, nest) {
+function gen_collect(obj, parent, nest) {
     let m = 'gen_' + obj.type
     let f = generators[m]
     if (!f) {
         return gen_unhandled(obj, nest)
     }
-    return f(obj, nest)
+    return f(obj, parent, nest)
 }
-function collect_body(body, nest) {
+function collect_body(obj, parent, nest) {
     function get_value(item) {
         switch (item.kind) {
             case 'symbol': return item.raw
@@ -140,7 +140,7 @@ function collect_body(body, nest) {
     let state = 0
     let run = undefined
     let so = ''
-    for (let item of body) {
+    for (let item of obj.body) {
         switch (state) {
             case 0:
                 if (item.type === 'value') {
@@ -149,7 +149,7 @@ function collect_body(body, nest) {
                     state = 1
                 }
                 else {
-                    so += gen_collect(item, nest)
+                    so += gen_collect(item, obj, nest)
                 }
                 break
             case 1:
@@ -159,7 +159,7 @@ function collect_body(body, nest) {
                 }
                 else {
                     so += `${pad(nest)}"${run.join('')}"\n`
-                    so += gen_collect(item, nest)
+                    so += gen_collect(item, obj, nest)
                     run = undefined
                     state = 0
                 }
@@ -171,8 +171,11 @@ function collect_body(body, nest) {
     }
     return so
 }
-function gen_group(obj, nest) {
-    let inner = collect_body(obj.body, nest + 1)
+function gen_group(obj, parent, nest) {
+    if (obj.behavior === 'ignore' && obj.body.length === 1) {
+        return gen_collect(obj.body[0], parent, nest)
+    }
+    let inner = collect_body(obj, parent, nest + 1)
     let op = (() => {
         switch (obj.behavior) {
             case 'normal':
@@ -190,7 +193,7 @@ function gen_group(obj, nest) {
     }
     return `${pad(nest)}/* Regex { // gen:group ${obj.behavior}\n${inner}${pad(nest)}} */\n`
 }
-function gen_reference(obj, nest) {
+function gen_reference(obj, parent, nest) {
     if (obj.name !== undefined) {
         return `${pad(nest)}${obj.name.value}\n`
     }
@@ -199,15 +202,15 @@ function gen_reference(obj, nest) {
     }
     return `${pad(nest)}// gen:reference ${obj.raw}\n`
 }
-function gen_alternative(obj, nest) {
-    let inner = collect_body(obj.body, nest + 1)
+function gen_alternative(obj, parent, nest) {
+    let inner = collect_body(obj, parent, nest + 1)
     let op = 'Regex'
     return `${pad(nest)}${op} {\n${inner}${pad(nest)}}\n`
 }
-function gen_disjunction(obj, nest) {
-    return `${pad(nest)}ChoiceOf {\n${obj.body.map(x => gen_collect(x, nest+1)).join('')}${pad(nest)}}\n`
+function gen_disjunction(obj, parent, nest) {
+    return `${pad(nest)}ChoiceOf {\n${obj.body.map(x => gen_collect(x, obj, nest+1)).join('')}${pad(nest)}}\n`
 }
-function gen_value(obj, nest) {
+function gen_value(obj, parent, nest) {
     function get_value(item) {
         switch (item.kind) {
             case 'symbol': return `"${item.raw}"`
@@ -228,36 +231,37 @@ function gen_value(obj, nest) {
     }
     return `${pad(nest)}${get_value(obj)}\n`
 }
-function gen_characterClass(obj, nest) {
+function gen_characterClass(obj, parent, nest) {
+    if (obj.kind === 'union')
     return `${pad(nest)}/${obj.raw}/\n`
 }
-function gen_characterClassEscape(obj, nest) {
+function gen_characterClassEscape(obj, parent, nest) {
     let mf = undefined
     switch (obj.value) {
         case 'd':
-            mf = 'One(.digit)'
+            mf = 'CharacterClass.digit'
             break
         case 'D':
-            mf = 'One(.digit.inverted)'
+            mf = 'CharacterClass.digit.inverted'
             break
         case 's':
-            mf = 'One(.whitespace)'
+            mf = 'CharacterClass.whitespace'
             break
         case 'S':
-            mf = 'One(.whitespace.inverted)'
+            mf = 'CharacterClass.whitespace.inverted'
             break
         case 'w':
-            mf = 'One(.word)'
+            mf = 'CharacterClass.word'
             break
         case 'W':
-            mf = 'One(.word.inverted)'
+            mf = 'CharacterClass.word.inverted'
             break
         default:
             mf = `// gen:characterClassEscape ${obj.value}`
     }
     return `${pad(nest)}${mf}\n`
 }
-function gen_quantifier(obj, nest) {
+function gen_quantifier(obj, parent, nest) {
     if (obj.body.length !== 1) {
         return gen_unhandled(obj, nest)
     }
@@ -295,7 +299,11 @@ function gen_quantifier(obj, nest) {
     if (args.length) {
         op = `${op}(${args.join(', ')})`
     }
-    return `${pad(nest)}${op} {\n${gen_collect(value, nest+1)}${pad(nest)}}\n`
+    let body = gen_collect(value, obj, nest+1)
+    if (value.type === 'group' && value.behavior === 'ignore') {
+        body = collect_body(value, obj, nest + 1)
+    }
+    return `${pad(nest)}${op} {\n${body}${pad(nest)}}\n`
 }
 function gen_modifier(k, nest) {
     let mf = ((k) => {
@@ -313,7 +321,7 @@ function gen_modifier(k, nest) {
     })(k)
     return `${pad(nest)}${mf}\n`
 }
-function gen_anchor(obj, nest) {
+function gen_anchor(obj, parent, nest) {
     let mf = undefined
     switch (obj.kind) {
         case 'start':
@@ -333,10 +341,10 @@ function gen_anchor(obj, nest) {
     }
     return `${pad(nest)}${mf}\n`
 }
-function gen_dot(obj, nest) {
+function gen_dot(obj, parent, nest) {
     return `${pad(nest)}.any\n`
 }
-function gen_unicodePropertyEscape(obj, nest) {
+function gen_unicodePropertyEscape(obj, parent, nest) {
     return `${pad(nest)}/${obj.raw}/ // CharacterClass.generalCategory(...)\n`
 }
 function gen_unhandled(obj, nest) {
@@ -358,7 +366,7 @@ const generators = {
 function generate(parsed, flags) {
     // if (parsed) console.log(parsed, flags)
     if (!parsed) { return '' }
-    let s = gen_collect(parsed, 0)
+    let s = gen_collect(parsed, {}, 0)
     switch (parsed.type) {
         case 'group':
         case 'alternative':
