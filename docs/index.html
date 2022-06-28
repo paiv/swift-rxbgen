@@ -84,6 +84,11 @@ code {white-space:pre-wrap;}
                 <input id="rfP" type="checkbox" name="rfP">
             ?P</label>
         </li>
+        <li>
+            <label for="rfw">
+                <input id="rfw" type="checkbox" name="rfw">
+            ?-w</label>
+        </li>
     </ul>
 </form>
 </div>
@@ -325,6 +330,7 @@ function gen_modifier(k, nest) {
             case 'W': return '.asciiOnlyWordCharacters()'
             case 'S': return '.asciiOnlyWhitespace()'
             case 'P': return '.asciiOnlyCharacterClasses()'
+            case 'w': return '.wordBoundaryKind(.unicodeLevel1)'
             default: return `// gen:modifier ${k}`
         }
     })(k)
@@ -437,7 +443,7 @@ function handleInput() {
     let rin = document.getElementById('rin')
     let out = document.getElementById('out')
     let flags = {}
-    for (let k of 'imsUDWSP') {
+    for (let k of 'imsUDWSPw') {
         let el = document.getElementById('rf' + k)
         flags[k] = el.checked
     }
@@ -456,7 +462,7 @@ function setupApp() {
     }})
     let rin = document.getElementById('rin')
     rin.addEventListener('input', handleInput)
-    for (let k of 'imsUDWSP') {
+    for (let k of 'imsUDWSPw') {
         let el = document.getElementById('rf' + k)
         el.addEventListener('change', handleInput)
     }
